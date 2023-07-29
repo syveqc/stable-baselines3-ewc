@@ -16,7 +16,7 @@ from matplotlib import pyplot as plt
 try:
     from torch.utils.tensorboard import SummaryWriter
     from torch.utils.tensorboard.summary import hparams
-except ImportError:
+except Exception:
     SummaryWriter = None  # type: ignore[misc, assignment]
 
 try:

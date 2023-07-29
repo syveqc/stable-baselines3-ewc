@@ -13,6 +13,11 @@ from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedul
 from stable_baselines3.common.utils import get_parameters_by_name, polyak_update
 from stable_baselines3.sac.policies import Actor, CnnPolicy, MlpPolicy, MultiInputPolicy, SACPolicy
 
+from torch.utils.data import DataLoader, TensorDataset
+
+from nngeometry.metrics import FIM
+from nngeometry.object import PMatDiag, PVector
+
 SelfSAC = TypeVar("SelfSAC", bound="SAC")
 
 
@@ -145,6 +150,8 @@ class SAC(OffPolicyAlgorithm):
             support_multi_env=True,
         )
 
+        self.fims = []
+        self.previous_params = []
         self.target_entropy = target_entropy
         self.log_ent_coef = None  # type: Optional[th.Tensor]
         # Entropy coefficient / Entropy temperature
@@ -190,6 +197,31 @@ class SAC(OffPolicyAlgorithm):
             # this will throw an error if a malformed string (different from 'auto')
             # is passed
             self.ent_coef_tensor = th.tensor(float(self.ent_coef), device=self.device)
+
+    def switch_task(self, batch_size=10000):
+        self.previous_params.append(th.nn.utils.parameters_to_vector(self.actor.parameters()).detach())
+
+        self.actor.zero_grad()
+
+        replay_data = self.replay_buffer.sample(batch_size, env=self._vec_normalize_env)
+
+
+        actions_pi, log_prob = self.actor.action_log_prob(replay_data.observations)
+        log_prob = log_prob.reshape(-1, 1)
+
+        q_values_pi = th.cat(self.critic(replay_data.observations, actions_pi), dim=1)
+        min_qf_pi, _ = th.min(q_values_pi, dim=1, keepdim=True)
+        actor_loss = -(min_qf_pi).mean()
+
+        actor_loss.backward()
+
+        grads = []
+        for param in self.actor.parameters():
+            grads.append(param.grad.view(-1))
+        grads = th.cat(grads)
+        fim = grads**2
+
+        self.fims.append(fim)
 
     def _create_aliases(self) -> None:
         self.actor = self.policy.actor
@@ -273,6 +305,11 @@ class SAC(OffPolicyAlgorithm):
             q_values_pi = th.cat(self.critic(replay_data.observations, actions_pi), dim=1)
             min_qf_pi, _ = th.min(q_values_pi, dim=1, keepdim=True)
             actor_loss = (ent_coef * log_prob - min_qf_pi).mean()
+            if len(self.fims) > 0:
+                current_params = th.nn.utils.parameters_to_vector(self.actor.parameters()).detach()
+                for fim, previous_params in zip(self.fims, self.previous_params):
+                    fim_loss = th.sum(fim*(current_params-previous_params)**2)
+                    actor_loss += fim_loss
             actor_losses.append(actor_loss.item())
 
             # Optimize the actor

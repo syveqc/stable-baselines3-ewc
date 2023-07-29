@@ -18,7 +18,7 @@ import stable_baselines3 as sb3
 # Check if tensorboard is available for pytorch
 try:
     from torch.utils.tensorboard import SummaryWriter
-except ImportError:
+except Exception:
     SummaryWriter = None
 
 from stable_baselines3.common.logger import Logger, configure
