@@ -152,6 +152,7 @@ class SAC(OffPolicyAlgorithm):
 
         self.fims = []
         self.previous_params = []
+        self.coefficients = []
         self.target_entropy = target_entropy
         self.log_ent_coef = None  # type: Optional[th.Tensor]
         # Entropy coefficient / Entropy temperature
@@ -198,8 +199,9 @@ class SAC(OffPolicyAlgorithm):
             # is passed
             self.ent_coef_tensor = th.tensor(float(self.ent_coef), device=self.device)
 
-    def switch_task(self, batch_size=10000):
+    def switch_task(self, coeff=1, batch_size=10000):
         self.previous_params.append(th.nn.utils.parameters_to_vector(self.actor.parameters()).detach())
+        self.coefficients.append(coeff)
 
         self.actor.zero_grad()
 
@@ -307,9 +309,9 @@ class SAC(OffPolicyAlgorithm):
             actor_loss = (ent_coef * log_prob - min_qf_pi).mean()
             if len(self.fims) > 0:
                 current_params = th.nn.utils.parameters_to_vector(self.actor.parameters()).detach()
-                for fim, previous_params in zip(self.fims, self.previous_params):
+                for fim, previous_params, coeff in zip(self.fims, self.previous_params, self.coefficients):
                     fim_loss = th.sum(fim*(current_params-previous_params)**2)
-                    actor_loss += fim_loss
+                    actor_loss += coeff*fim_loss
             actor_losses.append(actor_loss.item())
 
             # Optimize the actor
